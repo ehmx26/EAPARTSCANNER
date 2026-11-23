@@ -15,19 +15,36 @@ function inferBrandFromCode(mpn = '', brand = '', rawText = '') {
   if (brand && brand.trim()) return brand.trim();
   const combined = `${mpn} ${rawText}`.toUpperCase();
   if (combined.includes('RSAG7.') || combined.includes('HISENSE')) return 'Hisense';
-  if (combined.includes('BN44-') || combined.includes('BN94-') || combined.includes('BN96-') || combined.includes('SAMSUNG')) return 'Samsung';
-  if (combined.includes('EAX') || combined.includes('EBT') || combined.includes('EBR') || combined.includes('LG')) return 'LG';
+  if (
+    combined.includes('BN44-') ||
+    combined.includes('BN94-') ||
+    combined.includes('BN96-') ||
+    combined.includes('SAMSUNG')
+  ) {
+    return 'Samsung';
+  }
+  if (
+    combined.includes('EAX') ||
+    combined.includes('EBT') ||
+    combined.includes('EBR') ||
+    combined.includes('LG')
+  ) {
+    return 'LG';
+  }
   if (combined.includes('SONY')) return 'Sony';
-  if (combined.includes('W10') || combined.includes('WPW10') || combined.includes('WHIRLPOOL')) return 'Whirlpool';
+  if (combined.includes('W10') || combined.includes('WPW10') || combined.includes('WHIRLPOOL')) {
+    return 'Whirlpool';
+  }
   return '';
 }
 
 function extractFromPlainText(text = '') {
   const upper = String(text || '');
 
-  // Look for RSAG7.820... or RS467_820... codes first
   const rsagMatch = upper.match(/RS[A4][G6]7[._\-\s]*820[._\-\s]*[A-Z0-9]+(?:\/ROH)?/i);
-  const mpnLineMatch = upper.match(/(?:MPN|PART\s*(?:NO|NUMBER|#)?|BOARD\s*(?:NO|NUMBER|#)?|MODEL)\s*[:\-]\s*([A-Z0-9._/-]+)/i);
+  const mpnLineMatch = upper.match(
+    /(?:MPN|PART\s*(?:NO|NUMBER|#)?|BOARD\s*(?:NO|NUMBER|#)?|MODEL)\s*[:\-]\s*([A-Z0-9._/-]+)/i
+  );
   const serialMatch = upper.match(/(?:SERIAL|S\/N|SN)\s*[:\-]\s*([A-Z0-9._-]+)/i);
   const brandMatch = upper.match(/(?:BRAND|MANUFACTURER|MAKE)\s*[:\-]\s*([A-Za-z0-9 &.-]+)/i);
 
@@ -57,15 +74,21 @@ export default async function handler(req, res) {
       });
     }
 
-    const {
-      imageBase64,
-      mimeType = 'image/jpeg',
-      model = '@cf/meta/llama-3.2-11b-vision-instruct',
-    } = req.body || {};
+    const { imageBase64, model = '@cf/meta/llama-3.2-11b-vision-instruct' } = req.body || {};
 
     if (!imageBase64) {
       return res.status(400).json({ error: 'Missing imageBase64 in request body.' });
     }
+
+    const cleanBase64 = String(imageBase64).replace(/^data:image\/\w+;base64,/, '');
+    const imageArray = Array.from(Buffer.from(cleanBase64, 'base64'));
+
+    const prompt = [
+      'Read all printed part numbers, PCB silkscreen codes, barcode labels, serial numbers, and brand names on this part.',
+      'Reply ONLY with a single JSON object:',
+      '{"mpn":"","boardNumber":"","serialNumber":"","barcode":"","partName":"","brand":"","compatibleModels":[],"notes":"","ocrRawText":""}',
+      'Keep exact dots/dashes/slashes (for example RSAG7.820.12970/ROH).',
+    ].join('\n');
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 25000);
@@ -73,7 +96,7 @@ export default async function handler(req, res) {
     let response;
     try {
       response = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`,
+        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
         {
           method: 'POST',
           signal: controller.signal,
@@ -82,31 +105,10 @@ export default async function handler(req, res) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model,
+            prompt,
+            image: imageArray,
+            max_tokens: 250,
             temperature: 0.1,
-            max_tokens: 300,
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  {
-                    type: 'text',
-                    text: [
-                      'Read all printed part numbers, PCB silkscreen codes, barcode labels, serial numbers, and brand names on this part.',
-                      'Reply ONLY with a single JSON object (no markdown, no extra text):',
-                      '{"mpn":"","boardNumber":"","serialNumber":"","barcode":"","partName":"","brand":"","compatibleModels":[],"notes":"","ocrRawText":""}',
-                      'Keep exact dots/dashes/slashes (e.g. RSAG7.820.12970/ROH).',
-                    ].join('\n'),
-                  },
-                  {
-                    type: 'image_url',
-                    image_url: {
-                      url: `data:${mimeType};base64,${imageBase64}`,
-                    },
-                  },
-                ],
-              },
-            ],
           }),
         }
       );
@@ -124,13 +126,21 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: parsed?.errors?.[0]?.message || parsed?.error || `Cloudflare AI error (${response.status})`,
+    if (!response.ok || parsed?.success === false) {
+      return res.status(response.status || 400).json({
+        error:
+          parsed?.errors?.[0]?.message ||
+          parsed?.error ||
+          `Cloudflare AI error (${response.status})`,
       });
     }
 
-    const content = parsed?.choices?.[0]?.message?.content || '';
+    const resultObj = parsed?.result || {};
+    const content =
+      typeof resultObj.response === 'string'
+        ? resultObj.response
+        : JSON.stringify(resultObj || '');
+
     const jsonMatch = content.match(/\{[\s\S]*\}/);
 
     let extracted = {};
