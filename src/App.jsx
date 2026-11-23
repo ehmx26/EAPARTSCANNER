@@ -110,6 +110,17 @@ const INITIAL_INVENTORY = [
   },
   {
     id: 'inv-102',
+    sku: 'PART-EAX69083603-02',
+    title: 'LG OLED55CXPUA Main Board EAX69083603 EBT66432801 Tested',
+    mpn: 'EAX69083603',
+    price: 139.0,
+    cogs: 35.0,
+    quantity: 1,
+    status: 'ACTIVE',
+    image: 'https://images.unsplash.com/photo-1555680202-c86f0e12f086?auto=format&fit=crop&w=600&q=80',
+  },
+  {
+    id: 'inv-103',
     sku: 'PART-W10893917-03',
     title: 'Whirlpool Refrigerator Inverter Board W10893917 Working',
     mpn: 'W10893917',
@@ -124,8 +135,10 @@ const INITIAL_INVENTORY = [
 const INITIAL_ORDERS = [
   {
     id: 'ORD-98214',
-    buyer: 'tech_fixer_ny',
-    itemTitle: 'Samsung BN44-01055A Power Supply Board Tested',
+    buyer: 'tech_fixer_ny (Mike R.)',
+    address: '142 Industrial Pkwy, Suite 4, Rochester, NY 14624',
+    sku: 'PART-BN44-01055A-01',
+    itemTitle: 'Samsung BN44-01055A QN65Q70RAFXZA Power Supply Board Tested',
     mpn: 'BN44-01055A',
     salePrice: 79.99,
     ebayFees: 10.9,
@@ -136,8 +149,10 @@ const INITIAL_ORDERS = [
   },
   {
     id: 'ORD-98190',
-    buyer: 'appliance_pro_tx',
-    itemTitle: 'Whirlpool Refrigerator Inverter Board W10893917',
+    buyer: 'appliance_pro_tx (Carlos M.)',
+    address: '802 Oakridge Ave, Austin, TX 78704',
+    sku: 'PART-W10893917-03',
+    itemTitle: 'Whirlpool Refrigerator Inverter Board W10893917 Working',
     mpn: 'W10893917',
     salePrice: 64.99,
     ebayFees: 8.91,
@@ -145,6 +160,20 @@ const INITIAL_ORDERS = [
     netProfit: 44.08,
     status: 'SHIPPED',
     trackingNumber: '9400111202555910249120',
+  },
+  {
+    id: 'ORD-98104',
+    buyer: 'repair_depot_ca (Elena V.)',
+    address: '405 Market St, San Jose, CA 95110',
+    sku: 'PART-EAX69083603-02',
+    itemTitle: 'LG OLED55CXPUA Main Board EAX69083603 EBT66432801 Tested',
+    mpn: 'EAX69083603',
+    salePrice: 139.0,
+    ebayFees: 18.72,
+    cogs: 35.0,
+    netProfit: 85.28,
+    status: 'DELIVERED',
+    trackingNumber: '9205590123910294102941',
   },
 ];
 
@@ -191,7 +220,7 @@ function playSaleChime() {
     osc.start();
     osc.stop(ctx.currentTime + 0.45);
   } catch {
-    // Ignore audio errors when blocked by browser autoplay policy
+    // Ignore audio autoplay restrictions
   }
 }
 
@@ -1003,7 +1032,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(
-                      'CLOUDFLARE_ACCOUNT_ID=7ff4e406f6ba209022259bed28ea8fd9\nCLOUDFLARE_API_TOKEN=YOUR_TOKEN\nEBAY_APP_ID=\nEBAY_CERT_ID=\nEBAY_RUNAME='
+                      'CLOUDFLARE_ACCOUNT_ID=\nCLOUDFLARE_API_TOKEN=\nEBAY_APP_ID=\nEBAY_CERT_ID=\nEBAY_RUNAME='
                     );
                     showToast('Copied .env template');
                   }}
@@ -1014,8 +1043,8 @@ export default function App() {
                 </button>
               </div>
               <pre className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-amber-300 overflow-x-auto">
-{`CLOUDFLARE_ACCOUNT_ID=7ff4e406f6ba209022259bed28ea8fd9
-CLOUDFLARE_API_TOKEN=YOUR_TOKEN
+{`CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_API_TOKEN=
 EBAY_APP_ID=
 EBAY_CERT_ID=
 EBAY_RUNAME=`}
