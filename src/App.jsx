@@ -177,7 +177,7 @@ const INITIAL_ORDERS = [
   },
 ];
 
-async function compressFileToBase64(file, maxWidth = 1024, quality = 0.8) {
+async function compressFileToBase64(file, maxWidth = 768, quality = 0.65) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Could not read image file.'));
@@ -333,7 +333,7 @@ export default function App() {
     setScanError('');
 
     try {
-      const { dataUrl, base64 } = await compressFileToBase64(file, 1024, 0.8);
+      const { dataUrl, base64 } = await compressFileToBase64(file, 768, 0.65);
       setUploadedImages((prev) => [dataUrl, ...prev]);
 
       const res = await fetch('/api/scan-part', {
@@ -342,7 +342,7 @@ export default function App() {
         body: JSON.stringify({
           imageBase64: base64,
           mimeType: 'image/jpeg',
-          model: '@cf/google/gemma-4-26b-a4b-it',
+          model: '@cf/moondream/moondream3.1-9B-A2B',
         }),
       });
 
