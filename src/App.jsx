@@ -346,7 +346,14 @@ export default function App() {
         }),
       });
 
-      const data = await res.json();
+      const rawText = await res.text();
+      let data = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        throw new Error(rawText || `Server error (${res.status})`);
+      }
+
       if (!res.ok) {
         throw new Error(data.error || `Scan failed (${res.status})`);
       }
