@@ -11,15 +11,35 @@ function normalizeBoardCode(raw = '') {
   return code;
 }
 
-function inferBrandFromCode(mpn = '', brand = '') {
+function inferBrandFromCode(mpn = '', brand = '', rawText = '') {
   if (brand && brand.trim()) return brand.trim();
-  const upper = mpn.toUpperCase();
-  if (upper.startsWith('RSAG7.')) return 'Hisense';
-  if (upper.startsWith('BN44-') || upper.startsWith('BN94-') || upper.startsWith('BN96-')) return 'Samsung';
-  if (upper.startsWith('EAX') || upper.startsWith('EBT') || upper.startsWith('EBR')) return 'LG';
-  if (upper.startsWith('1-')) return 'Sony';
-  if (upper.startsWith('W10') || upper.startsWith('WPW10')) return 'Whirlpool';
+  const combined = `${mpn} ${rawText}`.toUpperCase();
+  if (combined.includes('RSAG7.') || combined.includes('HISENSE')) return 'Hisense';
+  if (combined.includes('BN44-') || combined.includes('BN94-') || combined.includes('BN96-') || combined.includes('SAMSUNG')) return 'Samsung';
+  if (combined.includes('EAX') || combined.includes('EBT') || combined.includes('EBR') || combined.includes('LG')) return 'LG';
+  if (combined.includes('SONY')) return 'Sony';
+  if (combined.includes('W10') || combined.includes('WPW10') || combined.includes('WHIRLPOOL')) return 'Whirlpool';
   return '';
+}
+
+function extractFromPlainText(text = '') {
+  const upper = String(text || '');
+
+  // Look for RSAG7.820... or RS467_820... codes first
+  const rsagMatch = upper.match(/RS[A4][G6]7[._\-\s]*820[._\-\s]*[A-Z0-9]+(?:\/ROH)?/i);
+  const mpnLineMatch = upper.match(/(?:MPN|PART\s*(?:NO|NUMBER|#)?|BOARD\s*(?:NO|NUMBER|#)?|MODEL)\s*[:\-]\s*([A-Z0-9._/-]+)/i);
+  const serialMatch = upper.match(/(?:SERIAL|S\/N|SN)\s*[:\-]\s*([A-Z0-9._-]+)/i);
+  const brandMatch = upper.match(/(?:BRAND|MANUFACTURER|MAKE)\s*[:\-]\s*([A-Za-z0-9 &.-]+)/i);
+
+  const rawCode = rsagMatch ? rsagMatch[0] : mpnLineMatch ? mpnLineMatch[1] : '';
+
+  return {
+    mpn: rawCode,
+    boardNumber: rawCode,
+    serialNumber: serialMatch ? serialMatch[1] : '',
+    brand: brandMatch ? brandMatch[1].trim() : '',
+    ocrRawText: text.trim(),
+  };
 }
 
 export default async function handler(req, res) {
@@ -47,13 +67,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing imageBase64 in request body.' });
     }
 
-    const systemPrompt = [
-      'Extract part sticker and PCB silkscreen details as strict JSON only.',
-      'Preserve dots (.), hyphens (-), and slashes (/) exactly. Distinguish A vs 4, G vs 6, O vs 0, I vs 1.',
-      'Hisense boards often use RSAG7.820.xxxxx/ROH.',
-      'JSON keys: {"mpn":"","boardNumber":"","serialNumber":"","barcode":"","partName":"","brand":"","category":"","compatibleModels":[],"condition":"Used - Fully Functional (Grade A)","notes":"","ocrRawText":""}',
-    ].join('\n');
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 25000);
 
@@ -71,15 +84,19 @@ export default async function handler(req, res) {
           body: JSON.stringify({
             model,
             temperature: 0.1,
-            max_tokens: 250,
+            max_tokens: 300,
             messages: [
-              { role: 'system', content: systemPrompt },
               {
                 role: 'user',
                 content: [
                   {
                     type: 'text',
-                    text: 'Read mpn, boardNumber, serialNumber, barcode, partName, brand, compatibleModels, and ocrRawText. Return JSON only.',
+                    text: [
+                      'Read all printed part numbers, PCB silkscreen codes, barcode labels, serial numbers, and brand names on this part.',
+                      'Reply ONLY with a single JSON object (no markdown, no extra text):',
+                      '{"mpn":"","boardNumber":"","serialNumber":"","barcode":"","partName":"","brand":"","compatibleModels":[],"notes":"","ocrRawText":""}',
+                      'Keep exact dots/dashes/slashes (e.g. RSAG7.820.12970/ROH).',
+                    ].join('\n'),
                   },
                   {
                     type: 'image_url',
@@ -115,18 +132,26 @@ export default async function handler(req, res) {
 
     const content = parsed?.choices?.[0]?.message?.content || '';
     const jsonMatch = content.match(/\{[\s\S]*\}/);
-    const cleaned = jsonMatch ? jsonMatch[0] : content.replace(/```json|```/gi, '').trim();
 
     let extracted = {};
-    try {
-      extracted = JSON.parse(cleaned);
-    } catch {
-      extracted = { ocrRawText: content };
+    let parsedJsonOk = false;
+
+    if (jsonMatch) {
+      try {
+        extracted = JSON.parse(jsonMatch[0]);
+        parsedJsonOk = true;
+      } catch {
+        parsedJsonOk = false;
+      }
+    }
+
+    if (!parsedJsonOk) {
+      extracted = extractFromPlainText(content);
     }
 
     const normalizedMpn = normalizeBoardCode(extracted.mpn || extracted.boardNumber || '');
     const normalizedBoard = normalizeBoardCode(extracted.boardNumber || extracted.mpn || '');
-    const resolvedBrand = inferBrandFromCode(normalizedMpn, extracted.brand);
+    const resolvedBrand = inferBrandFromCode(normalizedMpn, extracted.brand, content);
 
     let resolvedName = (extracted.partName || '').trim();
     if (!resolvedName || resolvedName.toLowerCase() === 'circuit board') {
