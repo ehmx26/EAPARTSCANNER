@@ -1,4 +1,4 @@
-const MODEL_ID = '@cf/meta/llama-3.2-11b-vision-instruct';
+const MODEL_ID = '@cf/google/gemma-4-26b-a4b-it';
 
 function normalizeBoardCode(raw = '') {
   let code = String(raw || '').trim().toUpperCase();
@@ -76,17 +76,12 @@ export default async function handler(req, res) {
       });
     }
 
-    const { imageBase64 } = req.body || {};
+    const { imageBase64, mimeType = 'image/jpeg' } = req.body || {};
     if (!imageBase64) {
       return res.status(400).json({ error: 'Missing imageBase64 in request body.' });
     }
 
     const cleanBase64 = String(imageBase64).replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '');
-    const imageArray = Array.from(new Uint8Array(Buffer.from(cleanBase64, 'base64')));
-
-    if (!imageArray.length) {
-      return res.status(400).json({ error: 'Invalid base64 image data.' });
-    }
 
     const prompt = [
       'Read all printed part numbers, PCB silkscreen codes, barcode labels, serial numbers, and brand names on this part.',
@@ -101,7 +96,7 @@ export default async function handler(req, res) {
     let response;
     try {
       response = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${MODEL_ID}`,
+        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`,
         {
           method: 'POST',
           signal: controller.signal,
@@ -110,10 +105,23 @@ export default async function handler(req, res) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            prompt,
-            image: imageArray,
-            max_tokens: 250,
+            model: MODEL_ID,
             temperature: 0.1,
+            max_tokens: 250,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: prompt },
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:${mimeType};base64,${cleanBase64}`,
+                    },
+                  },
+                ],
+              },
+            ],
           }),
         }
       );
@@ -140,12 +148,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const resultObj = parsed?.result || {};
-    const content =
-      typeof resultObj.response === 'string'
-        ? resultObj.response
-        : JSON.stringify(resultObj || '');
-
+    const content = parsed?.choices?.[0]?.message?.content || '';
     const jsonMatch = content.match(/\{[\s\S]*\}/);
 
     let extracted = {};
