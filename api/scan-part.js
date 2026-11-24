@@ -1,3 +1,5 @@
+const MODEL_ID = '@cf/meta/llama-3.2-11b-vision-instruct';
+
 function normalizeBoardCode(raw = '') {
   let code = String(raw || '').trim().toUpperCase();
   if (!code) return '';
@@ -74,14 +76,17 @@ export default async function handler(req, res) {
       });
     }
 
-    const { imageBase64, model = '@cf/meta/llama-3.2-11b-vision-instruct' } = req.body || {};
-
+    const { imageBase64 } = req.body || {};
     if (!imageBase64) {
       return res.status(400).json({ error: 'Missing imageBase64 in request body.' });
     }
 
-    const cleanBase64 = String(imageBase64).replace(/^data:image\/\w+;base64,/, '');
-    const imageArray = Array.from(Buffer.from(cleanBase64, 'base64'));
+    const cleanBase64 = String(imageBase64).replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '');
+    const imageArray = Array.from(new Uint8Array(Buffer.from(cleanBase64, 'base64')));
+
+    if (!imageArray.length) {
+      return res.status(400).json({ error: 'Invalid base64 image data.' });
+    }
 
     const prompt = [
       'Read all printed part numbers, PCB silkscreen codes, barcode labels, serial numbers, and brand names on this part.',
@@ -96,7 +101,7 @@ export default async function handler(req, res) {
     let response;
     try {
       response = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
+        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${MODEL_ID}`,
         {
           method: 'POST',
           signal: controller.signal,
