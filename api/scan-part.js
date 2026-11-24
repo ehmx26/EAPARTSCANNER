@@ -1,4 +1,4 @@
-const MODEL_ID = '@cf/google/gemma-4-26b-a4b-it';
+const GEMINI_MODEL = 'gemini-3.5-flash-lite';
 
 function normalizeBoardCode(raw = '') {
   let code = String(raw || '').trim().toUpperCase();
@@ -67,12 +67,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const accountId = (process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
-    const apiToken = (process.env.CLOUDFLARE_API_TOKEN || '').trim();
-
-    if (!accountId || !apiToken) {
+    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    if (!apiKey) {
       return res.status(500).json({
-        error: 'Missing CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN in Vercel environment variables.',
+        error: 'Missing GEMINI_API_KEY in Vercel environment variables.',
       });
     }
 
@@ -84,10 +82,12 @@ export default async function handler(req, res) {
     const cleanBase64 = String(imageBase64).replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '');
 
     const prompt = [
-      'Read all printed part numbers, PCB silkscreen codes, barcode labels, serial numbers, and brand names on this part.',
-      'Reply ONLY with a single JSON object:',
-      '{"mpn":"","boardNumber":"","serialNumber":"","barcode":"","partName":"","brand":"","compatibleModels":[],"notes":"","ocrRawText":""}',
-      'Keep exact dots/dashes/slashes (for example RSAG7.820.12970/ROH).',
+      'You are an electronics & appliance parts OCR parser for TV repair & eBay resellers.',
+      'Read all printed part numbers, PCB silkscreen codes, barcode stickers, serial numbers, and brand names.',
+      'Preserve exact dots (.), hyphens (-), and slashes (/)—for example RSAG7.820.12970/ROH.',
+      'Distinguish A vs 4, G vs 6, O vs 0, I vs 1, and S vs 5 carefully.',
+      'Return ONLY valid JSON with keys:',
+      '{"mpn":"","boardNumber":"","serialNumber":"","barcode":"","partName":"","brand":"","category":"","compatibleModels":[],"condition":"Used - Fully Functional (Grade A)","notes":"","ocrRawText":""}',
     ].join('\n');
 
     const controller = new AbortController();
@@ -96,32 +96,33 @@ export default async function handler(req, res) {
     let response;
     try {
       response = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
         {
           method: 'POST',
           signal: controller.signal,
           headers: {
-            Authorization: `Bearer ${apiToken}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: MODEL_ID,
-            temperature: 0.1,
-            max_tokens: 250,
-            messages: [
+            contents: [
               {
                 role: 'user',
-                content: [
-                  { type: 'text', text: prompt },
+                parts: [
+                  { text: prompt },
                   {
-                    type: 'image_url',
-                    image_url: {
-                      url: `data:${mimeType};base64,${cleanBase64}`,
+                    inlineData: {
+                      mimeType,
+                      data: cleanBase64,
                     },
                   },
                 ],
               },
             ],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 400,
+              responseMimeType: 'application/json',
+            },
           }),
         }
       );
@@ -135,20 +136,23 @@ export default async function handler(req, res) {
       parsed = rawText ? JSON.parse(rawText) : {};
     } catch {
       return res.status(response.status || 502).json({
-        error: rawText || 'Invalid response from Cloudflare AI',
+        error: rawText || 'Invalid response from Gemini API',
       });
     }
 
-    if (!response.ok || parsed?.success === false) {
-      return res.status(response.status || 400).json({
-        error:
-          parsed?.errors?.[0]?.message ||
-          parsed?.error ||
-          `Cloudflare AI error (${response.status})`,
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: parsed?.error?.message || `Gemini API error (${response.status})`,
       });
     }
 
-    const content = parsed?.choices?.[0]?.message?.content || '';
+    const parts = parsed?.candidates?.[0]?.content?.parts || [];
+    const content = parts
+      .map((p) => (typeof p?.text === 'string' && !p?.thought ? p.text : ''))
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
     const jsonMatch = content.match(/\{[\s\S]*\}/);
 
     let extracted = {};
@@ -199,7 +203,7 @@ export default async function handler(req, res) {
     const isTimeout = err?.name === 'AbortError' || err?.name === 'TimeoutError';
     return res.status(isTimeout ? 504 : 500).json({
       error: isTimeout
-        ? 'Cloudflare OCR timed out after 25s. Try a smaller or clearer photo.'
+        ? 'Gemini OCR timed out after 25s. Try a smaller or clearer photo.'
         : err?.message || 'Unhandled server error in /api/scan-part',
     });
   }
